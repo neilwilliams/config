@@ -218,7 +218,7 @@ describe Config::Options do
         expect(config.array[1].b).to eq("two")
       end
     end
-
+    
   end
 
 end

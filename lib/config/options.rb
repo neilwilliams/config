@@ -38,13 +38,13 @@ module Config
 
       ENV.each do |variable, value|
         separator = Config.env_separator
-        prefix = (Config.env_prefix || Config.const_name).to_s.split(separator)
+        prefix = (Config.env_prefix || Config.const_name).to_s
+        
+        new_keys = variable.to_s.split(separator)        
+        prefix_array = prefix.split(separator)
+        next if new_keys.shift(prefix_array.size) != prefix_array
 
-        keys = variable.to_s.split(separator)
-
-        next if keys.shift(prefix.size) != prefix
-
-        keys.map! { |key|
+        new_keys.map! { |key|
           case Config.env_converter
             when :downcase then
               key.downcase.to_sym
@@ -55,11 +55,17 @@ module Config
           end
         }
 
-        leaf = keys[0...-1].inject(hash) { |h, key|
+        # split the environment variable name based on the keys we have in our config
+        transformed_keys = __lookup_keys(new_keys, separator)
+        if transformed_keys.length > 0
+          new_keys = transformed_keys
+        end
+        
+        leaf = new_keys[0...-1].inject(hash) { |h, key|
           h[key] ||= {}
         }
 
-        leaf[keys.last] = Config.env_parse_values ? __value(value) : value
+        leaf[new_keys.last] = Config.env_parse_values ? __value(value) : value
       end
 
       merge!(hash)
@@ -225,6 +231,49 @@ module Config
       else
         Integer(v) rescue Float(v) rescue v
       end
+    end
+
+    def __lookup_keys(source_keys, separator, found_keys = [])
+      # if we've got no source keys, we must have got to the end of our search
+      return found_keys if source_keys.nil? || source_keys.length == 0
+
+      # To allow us to prefix keys with the same seperation character that exists in the config key, we need to search for the keys
+      lookup_key = nil
+      lookup_config = marshal_dump
+      # if we've passed in some found keys, we want to get the config keys from the appropriate level in our config
+      found_keys.each do |k|
+        lookup_config = lookup_config[k]
+      end
+
+      # we can find a config entry for the keys that have been found, so return what we have so they can be created
+      return found_keys if lookup_config.nil?
+
+      config_keys = lookup_config.keys
+
+      search_keys = source_keys.dup
+      (0..(search_keys.length - 1)).each do
+        lookup_key = config_keys.find{|k| k.to_sym == search_keys.join(separator).to_sym }
+        break if !lookup_key.nil?
+        
+        search_keys.pop
+      end
+        
+      found_keys ||= []
+      if !lookup_key.nil?
+        # we've found a key in our config that matches our env key, store this, and look inside this for the rest
+        found_keys << lookup_key
+        # get the new search keys
+        # do this by taking the original environment variable keys, and removing the key we've found in our config
+        env_key = source_keys.join(separator)
+        # replace "our_key_" first, then "our_key"
+        # leaving us with the remaining keys to search
+        env_key = env_key.gsub(lookup_key.to_s + separator, "").gsub(lookup_key.to_s, "") 
+        search_keys = env_key.split(separator)
+        
+        # call the same function again to get the next config key
+        found_keys = __lookup_keys(search_keys, separator, found_keys)
+      end
+      found_keys
     end
   end
 end
